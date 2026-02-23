@@ -7,8 +7,7 @@ from autogen_agentchat.conditions import MaxMessageTermination, TextMentionTermi
 from autogen_agentchat.messages import BaseAgentEvent, BaseChatMessage
 from autogen_agentchat.teams import SelectorGroupChat
 from autogen_core.tools import FunctionTool
-from autogen_ext.models.openai import AzureOpenAIChatCompletionClient
-from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+from autogen_ext.models.openai import AzureOpenAIChatCompletionClient, OpenAIChatCompletionClient
 
 from config.settings import Settings, load_prompt
 from config.memory import load_memory, format_memory_context
@@ -25,25 +24,55 @@ ITINERARY_AGENT = "itinerary_agent"
 USER = "user"
 
 
-def _build_model_client(settings: Settings) -> AzureOpenAIChatCompletionClient:
-    """Create the shared Azure OpenAI model client using Entra ID auth."""
+def _build_model_client(settings: Settings):
+    """Create the shared LLM client.
+
+    Supports:
+        - Groq Cloud   — free, fast inference (Llama 3.3 70B, Mixtral, etc.)
+        - Azure OpenAI — API key or Entra ID (DefaultAzureCredential) auth
+    """
+    model_info = {
+        "vision": False,
+        "function_calling": True,
+        "json_output": True,
+        "family": "unknown",
+        "structured_output": True,
+    }
+
+    if settings.provider == "groq":
+        # Groq Cloud — OpenAI-compatible API
+        return OpenAIChatCompletionClient(
+            model=settings.model_name,
+            api_key=settings.api_key,
+            base_url="https://api.groq.com/openai/v1",
+            model_info=model_info,
+        )
+
+    # Azure OpenAI
+    if settings.api_key:
+        # API key auth
+        return AzureOpenAIChatCompletionClient(
+            azure_deployment=settings.model_name,
+            model=settings.model_name,
+            api_key=settings.api_key,
+            azure_endpoint=settings.azure_openai_endpoint,
+            api_version=settings.azure_openai_api_version,
+            model_info=model_info,
+        )
+
+    # Entra ID auth (local dev — requires `az login`)
+    from azure.identity import DefaultAzureCredential, get_bearer_token_provider
     credential = DefaultAzureCredential()
     token_provider = get_bearer_token_provider(
         credential, "https://cognitiveservices.azure.com/.default"
     )
     return AzureOpenAIChatCompletionClient(
-        azure_deployment=settings.azure_openai_deployment,
-        model=settings.azure_openai_deployment,
+        azure_deployment=settings.model_name,
+        model=settings.model_name,
         azure_ad_token_provider=token_provider,
         azure_endpoint=settings.azure_openai_endpoint,
         api_version=settings.azure_openai_api_version,
-        model_info={
-            "vision": False,
-            "function_calling": True,
-            "json_output": True,
-            "family": "unknown",
-            "structured_output": True,
-        },
+        model_info=model_info,
     )
 
 
