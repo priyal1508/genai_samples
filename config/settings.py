@@ -14,25 +14,47 @@ _PROMPTS_DIR = _PROJECT_ROOT / "prompts"
 
 @dataclass(frozen=True)
 class Settings:
-    """Immutable application settings sourced from environment variables."""
+    """Immutable application settings sourced from environment variables.
 
-    azure_openai_endpoint: str
-    azure_openai_deployment: str
-    azure_openai_api_version: str
+    Supports two providers:
+        - ``groq``  — free Groq Cloud API (Llama 3.3, Mixtral, etc.)
+        - ``azure`` — Azure OpenAI with Entra ID or API key auth
+    """
+
+    provider: str               # "groq" or "azure"
+    model_name: str             # e.g. "llama-3.3-70b-versatile" or "gpt-4.1"
+    api_key: str = ""           # Groq API key or Azure API key
+    azure_openai_endpoint: str = ""
+    azure_openai_api_version: str = ""
 
     @classmethod
     def from_env(cls) -> "Settings":
         """Build settings from the current environment."""
+        provider = os.getenv("LLM_PROVIDER", "groq").lower()
 
-        def _require(key: str) -> str:
+        if provider == "groq":
+            groq_key = os.getenv("GROQ_API_KEY", "")
+            if not groq_key:
+                raise EnvironmentError("Missing required env var: GROQ_API_KEY")
+            model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+            return cls(provider="groq", model_name=model, api_key=groq_key)
+
+        # Azure provider
+        def _require(key: str, *alternates: str) -> str:
             value = os.getenv(key)
-            if not value:
-                raise EnvironmentError(f"Missing required env var: {key}")
-            return value
+            if value:
+                return value
+            for alt in alternates:
+                value = os.getenv(alt)
+                if value:
+                    return value
+            raise EnvironmentError(f"Missing required env var: {key}")
 
         return cls(
+            provider="azure",
+            model_name=_require("AZURE_OPENAI_DEPLOYMENT", "AZURE_OPENAI_MODEL_NAME"),
+            api_key=os.getenv("AZURE_OPENAI_KEY", ""),
             azure_openai_endpoint=_require("AZURE_OPENAI_ENDPOINT"),
-            azure_openai_deployment=_require("AZURE_OPENAI_DEPLOYMENT"),
             azure_openai_api_version=_require("AZURE_OPENAI_API_VERSION"),
         )
 
